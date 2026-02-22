@@ -7,10 +7,10 @@ from datetime import datetime
 from scipy.stats import norm
 
 st.set_page_config(page_title="NBA Dashboard with Monte Carlo Props", layout="centered")
-st.title("🏀 NBA Dashboard + Monte Carlo Player Prop Simulator")
+st.title("🏀 NBA Dashboard + Safe Monte Carlo Player Prop Simulator")
 
 # -----------------------------
-# Load JSON ratings
+# Load JSON ratings safely
 # -----------------------------
 try:
     with open("team_ratings.json") as f:
@@ -95,32 +95,43 @@ injury_impact = st.slider("Star or Teammate Injury Impact (%)", 0, 20, 0)
 b2b = st.checkbox("Back-to-Back Game?")
 n_sim = st.number_input("Number of Simulations per Player", min_value=1000, max_value=100000, value=10000, step=1000)
 
-# Filter players for selected game
+# -----------------------------
+# Filter starters for selected game
+# -----------------------------
 players_today = [p for p, data in player_ratings.items() if data["team"] in [home_team, away_team]]
+
+if not players_today:
+    st.error(f"No players found for {home_team} or {away_team}. Check player_ratings.json team names.")
+    st.stop()
+
 results = []
 
+# -----------------------------
+# Monte Carlo loop
+# -----------------------------
 for player_name in players_today:
     player = player_ratings[player_name]
     team = player["team"]
     team_data = team_ratings.get(team, default_team)
 
     # Base projection
-    proj = player[stat_choice] * (1 + player["usage"])
-    proj *= team_data["off"] / 114
-    proj *= team_data["pace"] / 100
+    proj = player.get(stat_choice, 0) * (1 + player.get("usage", 0))
+    proj *= team_data.get("off", 114) / 114
+    proj *= team_data.get("pace", 100) / 100
     proj *= 1.02
     if b2b:
         proj *= 0.97
     proj *= 1 - injury_impact / 100
     proj += line_adjust
 
-    std_dev = 3 * team_data["volatility"]
+    std_dev = 3 * team_data.get("volatility", 1.0)
 
     # Monte Carlo
     sim_results = np.random.normal(proj, std_dev, n_sim)
     prob_over = np.mean(sim_results >= proj)
     prob_under = np.mean(sim_results < proj)
 
+    # Default odds -110
     decimal_odds = 1 + 100 / 110
     implied_prob = 1 / decimal_odds
 
@@ -142,7 +153,13 @@ for player_name in players_today:
         "EV Under": round(ev_under, 3)
     })
 
-# Show results as sortable table
-df = pd.DataFrame(results).sort_values(by="EV Over", ascending=False)
-st.dataframe(df, use_container_width=True)
-st.caption("Monte Carlo simulations include usage, pace, home/away, B2B, and injury adjustments.")
+# -----------------------------
+# Display results safely
+# -----------------------------
+df = pd.DataFrame(results)
+if df.empty or "EV Over" not in df.columns:
+    st.error("No Monte Carlo results found. Check your player ratings or inputs.")
+else:
+    df = df.sort_values(by="EV Over", ascending=False)
+    st.dataframe(df, use_container_width=True)
+    st.caption("Monte Carlo projections include usage, pace, home/away, B2B, and injury adjustments.")
