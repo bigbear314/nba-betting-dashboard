@@ -1,6 +1,8 @@
 {
-default_team = {"off":114, "def":114, "pace":100, "volatility":1.0}
-
-away_data = ratings.get(away_team, default_team)
-home_data = ratings.get(home_team, default_team)
+  "Boston Celtics": {"off": 119.5, "def": 110.0, "pace": 99.0, "volatility": 1.05},
+  "Los Angeles Lakers": {"off": 114.0, "def": 113.5, "pace": 101.5, "volatility": 1.12},
+  "Milwaukee Bucks": {"off": 118.0, "def": 112.0, "pace": 100.0, "volatility": 1.08},
+  "Toronto Raptors": {"off": 111.5, "def": 115.5, "pace": 100.5, "volatility": 1.15},
+  "Cleveland Cavaliers": {"off": 116.5, "def": 109.5, "pace": 98.5, "volatility": 1.03},
+  "Oklahoma City Thunder": {"off": 118.5, "def": 111.0, "pace": 101.0, "volatility": 1.10}
 }
