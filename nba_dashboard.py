@@ -1,7 +1,7 @@
 import streamlit as st
 import numpy as np
 from scipy.stats import norm
-from nba_api.stats.endpoints import scoreboardv2
+from nba_api.stats.endpoints import scoreboardv3
 from nba_api.stats.static import teams
 from datetime import datetime
 
@@ -27,7 +27,7 @@ team_pace = {}
 today = datetime.today().strftime('%m/%d/%Y')
 
 try:
-    scoreboard = scoreboardv2.ScoreboardV2(game_date=today)
+    scoreboard = scoreboardv3.ScoreboardV3(game_date=today)
     games_df = scoreboard.get_data_frames()[0]
 except:
     st.error("Could not load today's games.")
