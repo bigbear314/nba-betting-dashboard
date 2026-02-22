@@ -141,16 +141,16 @@ for player_name in players_today:
     ev_under = (prob_under * (decimal_odds - 1)) - (1 - prob_under)
 
     results.append({
-        "Player": player_name,
-        "Team": team,
-        "Stat": stat_choice.upper(),
-        "Projection": round(proj, 2),
-        "Over Prob %": round(prob_over*100, 2),
-        "Under Prob %": round(prob_under*100, 2),
-        "Edge Over %": round(edge_over*100, 2),
-        "Edge Under %": round(edge_under*100, 2),
-        "EV Over": round(ev_over, 3),
-        "EV Under": round(ev_under, 3)
+    "Player": player_name,
+    "Team": team,
+    "Stat": stat_choice.upper(),
+    "Projection": round(proj, 2),
+    "Over Prob %": round(prob_over*100, 2),
+    "Under Prob %": round(prob_under*100, 2),
+    "Edge Over %": round(edge_over*100, 2),
+    "Edge Under %": round(edge_under*100, 2),
+    "EV Over": round(ev_over, 3) if 'ev_over' in locals() else 0,
+    "EV Under": round(ev_under, 3) if 'ev_under' in locals() else 0
     })
 
 # -----------------------------
