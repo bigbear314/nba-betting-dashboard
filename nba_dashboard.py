@@ -1,9 +1,12 @@
 import streamlit as st
 import numpy as np
+import json
 from scipy.stats import norm
 from nba_api.stats.endpoints import scoreboardv3
 from nba_api.stats.static import teams
 from datetime import datetime
+
+from scipy.stats import norm
 
 st.set_page_config(page_title="NBA Edge Engine", layout="centered")
 
@@ -140,5 +143,83 @@ st.write(f"Under Probability: {round(prob_under * 100, 2)}%")
 
 st.write(f"Edge vs Market: {round(edge * 100, 2)}%")
 st.write(f"Expected Value: {round(ev, 3)} units")
+
+# Load player ratings
+with open("player_ratings.json") as f:
+    players = json.load(f)
+
+player_names = list(players.keys())
+selected_player = st.selectbox("Select Player", player_names)
+
+stat_choice = st.selectbox("Select Stat", ["pts", "reb", "ast", "PRA"])
+
+player_data = players[selected_player]
+
+# Load team ratings
+with open("team_ratings.json") as f:
+    team_ratings = json.load(f)
+
+team = player_data["team"]
+team_data = team_ratings.get(team, {"off": 114, "def": 114, "pace": 100, "volatility": 1.0})
+
+# ----------------------
+# Inputs
+# ----------------------
+line = st.number_input("Sportsbook Line", value=player_data[stat_choice])
+odds = st.number_input("American Odds", value=-110)
+injury_impact = st.slider("Star or teammate injury impact (%)", 0, 20, 0)
+b2b = st.checkbox("Back-to-back game?")
+
+# ----------------------
+# Auto Projection Logic
+# ----------------------
+base = player_data[stat_choice]
+
+# Usage scaling (simple hybrid)
+projection = base * (1 + player_data["usage"])  # inflates high-usage players
+
+# Team offensive adjustment
+projection *= team_data["off"] / 114
+projection *= team_data["pace"] / 100
+
+# Home/away (for simplicity assume home)
+projection *= 1.02
+
+# Back-to-back
+if b2b:
+    projection *= 0.97
+
+# Injury impact
+projection *= 1 - injury_impact / 100
+
+# Volatility
+std_dev = 3 * team_data["volatility"]  # typical player game variance
+
+# ----------------------
+# Probabilities & EV
+# ----------------------
+prob_over = 1 - norm.cdf(line, projection, std_dev)
+prob_under = norm.cdf(line, projection, std_dev)
+
+if odds < 0:
+    decimal_odds = 1 + 100 / abs(odds)
+else:
+    decimal_odds = 1 + odds / 100
+
+implied_prob = 1 / decimal_odds
+edge_over = prob_over - implied_prob
+edge_under = prob_under - implied_prob
+ev_over = (prob_over * (decimal_odds - 1)) - (1 - prob_over)
+ev_under = (prob_under * (decimal_odds - 1)) - (1 - prob_under)
+
+# ----------------------
+# Output
+# ----------------------
+st.subheader(f"{selected_player} - {stat_choice.upper()} Prop")
+
+st.write(f"Projection: {projection:.2f} {stat_choice.upper()}")
+st.write(f"Over Probability: {prob_over*100:.2f}% | Under Probability: {prob_under*100:.2f}%")
+st.write(f"Edge Over: {edge_over*100:.2f}% | Edge Under: {edge_under*100:.2f}%")
+st.write(f"EV Over: {ev_over:.3f} units | EV Under: {ev_under:.3f} units")
 
 st.caption("Model simulation. Not financial advice.")
