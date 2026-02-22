@@ -2,3 +2,6 @@ streamlit
 numpy
 scipy
 matplotlib
+nba_api
+requests
+pandas
