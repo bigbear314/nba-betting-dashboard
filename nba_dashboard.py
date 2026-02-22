@@ -1,91 +1,103 @@
 import streamlit as st
 import numpy as np
-from scipy.stats import norm
 import matplotlib.pyplot as plt
+from scipy.stats import norm
 
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="NBA Prop Edge Engine", layout="centered")
 
-# ----------------------------
-# TITLE
-# ----------------------------
-st.title("🏀 NBA Betting Edge Engine")
+st.title("🏀 NBA Betting Edge Engine v2")
+st.write("Evaluate player props, team totals, or full game totals.")
 
-# ----------------------------
-# SIDEBAR INPUTS
-# ----------------------------
-st.sidebar.header("Player Profile")
+st.divider()
 
-player_name = st.sidebar.text_input("Player Name", "James Harden")
-base_points = st.sidebar.number_input("Base Points Avg", 10.0, 40.0, 25.0)
-std_dev = st.sidebar.number_input("Volatility (Std Dev)", 2.0, 15.0, 6.0)
+# ------------------------
+# INPUT SECTION
+# ------------------------
 
-st.sidebar.header("Game Context")
+st.subheader("Bet Details")
 
-opp_def_rating = st.sidebar.number_input("Opponent Defensive Rating", 100.0, 125.0, 118.0)
-drop_pct = st.sidebar.slider("Drop Coverage %", 0.0, 1.0, 0.55)
-switch_pct = st.sidebar.slider("Switch Coverage %", 0.0, 1.0, 0.30)
-back_to_back = st.sidebar.checkbox("Back-to-Back Game")
+bet_type = st.selectbox(
+    "Select Bet Type",
+    ["Player Prop", "Team Total", "Full Game Total"]
+)
 
-st.sidebar.header("Bet Info")
+name_input = st.text_input("Enter Player or Team Name")
 
-line = st.sidebar.number_input("Sportsbook Line", 5.0, 50.0, 24.5)
-odds = st.sidebar.number_input("American Odds", -200, 300, -110)
+stat_type = st.selectbox(
+    "Stat Category",
+    ["Points", "Rebounds", "Assists", "PRA", "3PT Made", "Team Total Points", "Game Total Points"]
+)
 
-# ----------------------------
-# PROJECTION ENGINE
-# ----------------------------
-projection = base_points
+line = st.number_input("Sportsbook Line", value=221.5)
+odds = st.number_input("American Odds (ex: -110)", value=-110)
 
-coverage_boost = (drop_pct * 0.04) + (switch_pct * -0.05)
-projection *= (1 + coverage_boost)
+st.divider()
 
-league_avg_def = 113
-def_adjustment = (opp_def_rating - league_avg_def) * 0.002
-projection *= (1 + def_adjustment)
+st.subheader("Model Projection Inputs")
 
-if back_to_back:
-    projection *= 0.96
+model_mean = st.number_input("Your Projected Mean Outcome", value=222.0)
+std_dev = st.number_input("Expected Standard Deviation", value=12.0)
 
-projection = round(projection, 2)
+st.divider()
 
-# ----------------------------
-# MONTE CARLO SIMULATION
-# ----------------------------
-simulations = np.random.normal(projection, std_dev, 10000)
-prob_over = np.mean(simulations > line)
+# ------------------------
+# CALCULATIONS
+# ------------------------
 
-# Convert odds
-if odds > 0:
-    decimal_odds = 1 + odds / 100
+prob_over = 1 - norm.cdf(line, model_mean, std_dev)
+prob_under = norm.cdf(line, model_mean, std_dev)
+
+if odds < 0:
+    decimal_odds = 1 + (100 / abs(odds))
 else:
-    decimal_odds = 1 + 100 / abs(odds)
+    decimal_odds = 1 + (odds / 100)
 
-expected_value = (prob_over * decimal_odds) - 1
+implied_prob = 1 / decimal_odds
 
-# ----------------------------
-# DISPLAY RESULTS
-# ----------------------------
-col1, col2, col3 = st.columns(3)
+edge_over = prob_over - implied_prob
+edge_under = prob_under - implied_prob
 
-col1.metric("Projected Points", projection)
-col2.metric("Probability Over", f"{prob_over:.2%}")
-col3.metric("Expected Value", f"{expected_value:.3f}")
+ev_over = (prob_over * (decimal_odds - 1)) - (1 - prob_over)
+ev_under = (prob_under * (decimal_odds - 1)) - (1 - prob_under)
 
-# ----------------------------
-# DISTRIBUTION PLOT
-# ----------------------------
+# ------------------------
+# OUTPUT
+# ------------------------
+
+st.subheader("📊 Probability Results")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.metric("Over Probability", f"{prob_over*100:.2f}%")
+    st.metric("Over Edge", f"{edge_over*100:.2f}%")
+    st.metric("Over EV (Units)", f"{ev_over:.3f}")
+
+with col2:
+    st.metric("Under Probability", f"{prob_under*100:.2f}%")
+    st.metric("Under Edge", f"{edge_under*100:.2f}%")
+    st.metric("Under EV (Units)", f"{ev_under:.3f}")
+
+st.divider()
+
+# ------------------------
+# DISTRIBUTION CHART
+# ------------------------
+
+st.subheader("Distribution Projection")
+
+x = np.linspace(model_mean - 4*std_dev, model_mean + 4*std_dev, 1000)
+y = norm.pdf(x, model_mean, std_dev)
+
 fig, ax = plt.subplots()
-ax.hist(simulations, bins=50)
-ax.axvline(line)
-ax.set_title(f"{player_name} Points Distribution")
+ax.plot(x, y)
+ax.axvline(line, linestyle='--')
+ax.set_title(f"{name_input} - {stat_type} Projection")
+ax.set_xlabel("Outcome")
+ax.set_ylabel("Probability Density")
+
 st.pyplot(fig)
 
-# ----------------------------
-# EDGE INTERPRETATION
-# ----------------------------
-st.subheader("Model Interpretation")
+st.divider()
 
-if expected_value > 0:
-    st.success("Positive Expected Value Bet")
-else:
-    st.warning("No Positive Edge Detected")
+st.caption("Model-based probability simulator. Not financial advice.")
