@@ -1,0 +1,6 @@
+{
+  "James Harden": {"team": "Cleveland Cavaliers", "pts": 28.5, "reb": 6.0, "ast": 8.0, "usage": 0.31},
+  "Shai Gilgeous-Alexander": {"team": "Oklahoma City Thunder", "pts": 31.2, "reb": 5.0, "ast": 5.8, "usage": 0.32},
+  "LeBron James": {"team": "Los Angeles Lakers", "pts": 27.0, "reb": 8.0, "ast": 7.5, "usage": 0.30},
+  "Giannis Antetokounmpo": {"team": "Milwaukee Bucks", "pts": 29.8, "reb": 11.2, "ast": 5.9, "usage": 0.34}
+}
