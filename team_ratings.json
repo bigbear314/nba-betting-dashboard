@@ -1,4 +1,6 @@
+{
 default_team = {"off":114, "def":114, "pace":100, "volatility":1.0}
 
 away_data = ratings.get(away_team, default_team)
 home_data = ratings.get(home_team, default_team)
+}
