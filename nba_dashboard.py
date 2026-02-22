@@ -24,25 +24,25 @@ team_pace = {}
 # GET TODAY'S GAMES
 # ----------------------
 
-today = datetime.today().strftime('%m/%d/%Y')
+from nba_api.stats.endpoints import scoreboardv3
+from datetime import datetime
+
+today = datetime.today().strftime('%Y-%m-%d')
 
 try:
     scoreboard = scoreboardv3.ScoreboardV3(game_date=today)
-    games_df = scoreboard.get_data_frames()[0]
+    data = scoreboard.get_dict()
 except:
     st.error("Could not load today's games.")
     st.stop()
 
 games = []
 
-for _, row in games_df.iterrows():
-    home_id = row["HOME_TEAM_ID"]
-    away_id = row["VISITOR_TEAM_ID"]
-
-    home_team = teams.find_team_name_by_id(home_id)["full_name"]
-    away_team = teams.find_team_name_by_id(away_id)["full_name"]
-
-    games.append(f"{away_team} @ {home_team}")
+if "scoreboard" in data and "games" in data["scoreboard"]:
+    for game in data["scoreboard"]["games"]:
+        home_team = game["homeTeam"]["teamName"]
+        away_team = game["awayTeam"]["teamName"]
+        games.append(f"{away_team} @ {home_team}")
 
 if len(games) == 0:
     st.warning("No games today.")
@@ -51,8 +51,6 @@ if len(games) == 0:
 selected_game = st.selectbox("Select Game", games)
 
 away_team, home_team = selected_game.split(" @ ")
-
-st.write(f"Selected: {away_team} @ {home_team}")
 
 # ----------------------
 # SIMPLE MANUAL RATINGS INPUT
