@@ -1,35 +1,30 @@
 import streamlit as st
-import numpy as np
 import json
+import numpy as np
 from scipy.stats import norm
-from nba_api.stats.endpoints import scoreboardv3
-from nba_api.stats.static import teams
-from datetime import datetime
-
-from scipy.stats import norm
-
-st.set_page_config(page_title="NBA Edge Engine", layout="centered")
-
-st.title("NBA Auto Slate Betting Engine")
-
-# ----------------------
-# BASIC TEAM RATINGS
-# ----------------------
-
-league_avg_rating = 114
-league_avg_pace = 100
-
-team_off = {}
-team_def = {}
-team_pace = {}
-
-# ----------------------
-# GET TODAY'S GAMES
-# ----------------------
-
 from nba_api.stats.endpoints import scoreboardv3
 from datetime import datetime
 
+st.set_page_config(page_title="NBA Player & Team Edge Engine", layout="centered")
+st.title("🏀 NBA Edge Engine (v3 Compatible)")
+
+# -----------------------------
+# Load team ratings safely
+# -----------------------------
+with open("team_ratings.json") as f:
+    team_ratings = json.load(f)
+
+default_team = {"off": 114, "def": 114, "pace": 100, "volatility": 1.0}
+
+# -----------------------------
+# Load player ratings safely
+# -----------------------------
+with open("player_ratings.json") as f:
+    player_ratings = json.load(f)
+
+# -----------------------------
+# Auto-detect today's slate
+# -----------------------------
 today = datetime.today().strftime('%Y-%m-%d')
 
 try:
@@ -40,164 +35,99 @@ except:
     st.stop()
 
 games = []
+for game in data.get("scoreboard", {}).get("games", []):
+    home_team = game["homeTeam"]["teamName"]
+    away_team = game["awayTeam"]["teamName"]
+    games.append(f"{away_team} @ {home_team}")
 
-if "scoreboard" in data and "games" in data["scoreboard"]:
-    for game in data["scoreboard"]["games"]:
-        home_team = game["homeTeam"]["teamName"]
-        away_team = game["awayTeam"]["teamName"]
-        games.append(f"{away_team} @ {home_team}")
-
-if len(games) == 0:
+if not games:
     st.warning("No games today.")
     st.stop()
 
 selected_game = st.selectbox("Select Game", games)
-
 away_team, home_team = selected_game.split(" @ ")
 
-# ----------------------
-# SIMPLE MANUAL RATINGS INPUT
-# ----------------------
+st.write(f"Selected matchup: **{away_team} @ {home_team}**")
 
-st.subheader("Enter Team Ratings")
+# -----------------------------
+# Team Projections
+# -----------------------------
+away_data = team_ratings.get(away_team, default_team)
+home_data = team_ratings.get(home_team, default_team)
 
-away_off = st.number_input(f"{away_team} Offensive Rating", value=115.0)
-away_def = st.number_input(f"{away_team} Defensive Rating", value=112.0)
-away_pace = st.number_input(f"{away_team} Pace", value=100.0)
+avg_pace = (away_data["pace"] + home_data["pace"]) / 2
 
-home_off = st.number_input(f"{home_team} Offensive Rating", value=116.0)
-home_def = st.number_input(f"{home_team} Defensive Rating", value=111.0)
-home_pace = st.number_input(f"{home_team} Pace", value=100.0)
+away_proj = (away_data["off"] / 114) * (home_data["def"] / 114) * 112
+home_proj = (home_data["off"] / 114) * (away_data["def"] / 114) * 112
 
-# ----------------------
-# INJURY ADJUSTMENT
-# ----------------------
+away_proj *= avg_pace / 100
+home_proj *= avg_pace / 100
 
-st.subheader("Injury Adjustment")
+# Home court baked in
+home_proj *= 1.025
+away_proj *= 0.975
 
-injury_team = st.selectbox(
-    "Apply Injury Impact To:",
-    ["None", away_team, home_team]
-)
+# Volatility (for std dev)
+std_dev_team = 12 * ((away_data["volatility"] + home_data["volatility"]) / 2)
+total_projection = away_proj + home_proj
 
-injury_percent = st.slider("Offensive Reduction %", 0, 20, 5)
-
-# ----------------------
-# PROJECTION LOGIC
-# ----------------------
-
-avg_pace = (away_pace + home_pace) / 2
-
-away_projection = (away_off / league_avg_rating) * (home_def / league_avg_rating) * 110
-home_projection = (home_off / league_avg_rating) * (away_def / league_avg_rating) * 110
-
-away_projection *= (avg_pace / league_avg_pace)
-home_projection *= (avg_pace / league_avg_pace)
-
-# home advantage
-home_projection *= 1.02
-away_projection *= 0.98
-
-# injury impact
-if injury_team == away_team:
-    away_projection *= (1 - injury_percent / 100)
-
-if injury_team == home_team:
-    home_projection *= (1 - injury_percent / 100)
-
-total_projection = away_projection + home_projection
-
-# ----------------------
-# MARKET INPUT
-# ----------------------
-
-st.subheader("Market Line")
-
-line = st.number_input("Sportsbook Total", value=220.5)
+# -----------------------------
+# Market input
+# -----------------------------
+st.subheader("Game Total Line")
+line = st.number_input("Sportsbook Total Line", value=total_projection)
 odds = st.number_input("American Odds", value=-110)
 
-std_dev = 12
-
-prob_over = 1 - norm.cdf(line, total_projection, std_dev)
-prob_under = norm.cdf(line, total_projection, std_dev)
+prob_over = 1 - norm.cdf(line, total_projection, std_dev_team)
+prob_under = norm.cdf(line, total_projection, std_dev_team)
 
 if odds < 0:
-    decimal_odds = 1 + (100 / abs(odds))
+    decimal_odds = 1 + 100 / abs(odds)
 else:
-    decimal_odds = 1 + (odds / 100)
+    decimal_odds = 1 + odds / 100
 
 implied_prob = 1 / decimal_odds
 edge = prob_over - implied_prob
 ev = (prob_over * (decimal_odds - 1)) - (1 - prob_over)
 
-# ----------------------
-# OUTPUT
-# ----------------------
+st.subheader("Team Total Projection")
+st.write(f"Projected Total: {total_projection:.2f}")
+st.write(f"Over Probability: {prob_over*100:.2f}% | Under Probability: {prob_under*100:.2f}%")
+st.write(f"Edge vs Market: {edge*100:.2f}% | EV: {ev:.3f} units")
 
-st.subheader("Model Output")
+# -----------------------------
+# Player Prop Module
+# -----------------------------
+st.divider()
+st.subheader("Player Prop Edge Engine")
 
-st.write(f"Projected Total: {round(total_projection, 2)}")
-
-st.write(f"Over Probability: {round(prob_over * 100, 2)}%")
-st.write(f"Under Probability: {round(prob_under * 100, 2)}%")
-
-st.write(f"Edge vs Market: {round(edge * 100, 2)}%")
-st.write(f"Expected Value: {round(ev, 3)} units")
-
-# Load player ratings
-with open("player_ratings.json") as f:
-    players = json.load(f)
-
-player_names = list(players.keys())
+player_names = list(player_ratings.keys())
 selected_player = st.selectbox("Select Player", player_names)
-
 stat_choice = st.selectbox("Select Stat", ["pts", "reb", "ast", "PRA"])
 
-player_data = players[selected_player]
-
-# Load team ratings
-with open("team_ratings.json") as f:
-    team_ratings = json.load(f)
-
+player_data = player_ratings[selected_player]
 team = player_data["team"]
-team_data = team_ratings.get(team, {"off": 114, "def": 114, "pace": 100, "volatility": 1.0})
+team_data = team_ratings.get(team, default_team)
 
-# ----------------------
 # Inputs
-# ----------------------
-line = st.number_input("Sportsbook Line", value=player_data[stat_choice])
-odds = st.number_input("American Odds", value=-110)
+line = st.number_input(f"{selected_player} {stat_choice.upper()} Line", value=player_data[stat_choice])
+odds = st.number_input("American Odds", value=-110, key="player_odds")
 injury_impact = st.slider("Star or teammate injury impact (%)", 0, 20, 0)
 b2b = st.checkbox("Back-to-back game?")
 
-# ----------------------
-# Auto Projection Logic
-# ----------------------
+# Projection logic
 base = player_data[stat_choice]
-
-# Usage scaling (simple hybrid)
-projection = base * (1 + player_data["usage"])  # inflates high-usage players
-
-# Team offensive adjustment
-projection *= team_data["off"] / 114
-projection *= team_data["pace"] / 100
-
-# Home/away (for simplicity assume home)
-projection *= 1.02
-
-# Back-to-back
+projection = base * (1 + player_data["usage"])        # usage scaling
+projection *= team_data["off"] / 114                  # team offense adjustment
+projection *= team_data["pace"] / 100                 # pace adjustment
+projection *= 1.02                                    # assume home court
 if b2b:
     projection *= 0.97
+projection *= 1 - injury_impact / 100                # injury impact
 
-# Injury impact
-projection *= 1 - injury_impact / 100
+std_dev = 3 * team_data["volatility"]               # typical player variance
 
-# Volatility
-std_dev = 3 * team_data["volatility"]  # typical player game variance
-
-# ----------------------
 # Probabilities & EV
-# ----------------------
 prob_over = 1 - norm.cdf(line, projection, std_dev)
 prob_under = norm.cdf(line, projection, std_dev)
 
@@ -212,14 +142,9 @@ edge_under = prob_under - implied_prob
 ev_over = (prob_over * (decimal_odds - 1)) - (1 - prob_over)
 ev_under = (prob_under * (decimal_odds - 1)) - (1 - prob_under)
 
-# ----------------------
-# Output
-# ----------------------
 st.subheader(f"{selected_player} - {stat_choice.upper()} Prop")
-
 st.write(f"Projection: {projection:.2f} {stat_choice.upper()}")
 st.write(f"Over Probability: {prob_over*100:.2f}% | Under Probability: {prob_under*100:.2f}%")
 st.write(f"Edge Over: {edge_over*100:.2f}% | Edge Under: {edge_under*100:.2f}%")
 st.write(f"EV Over: {ev_over:.3f} units | EV Under: {ev_under:.3f} units")
-
-st.caption("Model simulation. Not financial advice.")
+st.caption("All projections include usage, pace, home/away, B2B, and injury adjustments.")
