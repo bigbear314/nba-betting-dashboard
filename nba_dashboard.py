@@ -1,3 +1,4 @@
+# app_with_injury_redistribution.py
 import streamlit as st
 import json
 import numpy as np
@@ -5,25 +6,22 @@ import pandas as pd
 from nba_api.stats.endpoints import scoreboardv3
 from datetime import datetime
 
-st.set_page_config(page_title="NBA Pro Monte Carlo Dashboard", layout="centered")
-st.title("🏀 NBA Pro Monte Carlo Betting Dashboard")
+st.set_page_config(page_title="NBA Pro Monte Carlo Dashboard (Injury-aware)", layout="centered")
+st.title("🏀 NBA Pro Monte Carlo Betting Dashboard (Injury-aware)")
 
 # ---------------------------------------------------
 # Utility Functions
 # ---------------------------------------------------
 def american_to_profit(odds: int) -> float:
-    """Profit per 1 unit stake (excludes stake)."""
     if odds > 0:
         return odds / 100.0
     return 100.0 / abs(odds)
 
 def calculate_ev(prob: float, odds: int) -> float:
-    """EV in units per 1 unit stake."""
     profit = american_to_profit(odds)
     return (prob * profit) - (1 - prob)
 
 def get_team_sd(mean_points: float) -> float:
-    """Calibrated NBA-ish team score SD."""
     base_sd = 11.0
     return base_sd * (mean_points / 110.0)
 
@@ -84,14 +82,150 @@ home_mean = (home_data["off"] / 114.0) * (away_data["def"] / 114.0) * 112.0
 away_mean *= avg_pace / 100.0
 home_mean *= avg_pace / 100.0
 
-# Home court
 home_mean *= 1.025
 away_mean *= 0.975
 
 # ---------------------------------------------------
+# Build players_today list (rotation players in data)
+# ---------------------------------------------------
+players_today = [
+    p for p, d in player_ratings.items()
+    if d.get("team") in [home_team, away_team]
+]
+
+if not players_today:
+    st.error(f"No players found for {home_team} or {away_team}. Check player_ratings.json team names.")
+    st.stop()
+
+# Create a small helper map for quick lookup
+players_info = {p: player_ratings[p] for p in players_today}
+
+# ---------------------------------------------------
+# Injury Manager UI
+# ---------------------------------------------------
+st.subheader("Injury Manager (affects usage & projections)")
+
+# Persist injured players selection in session_state to avoid reset
+if "injured_players" not in st.session_state:
+    st.session_state.injured_players = []
+
+# Multiselect to pick injured/limited players from today's rotation
+selected_injured = st.multiselect(
+    "Select players to mark as Limited/Out (choose any number):",
+    options=players_today,
+    default=st.session_state.injured_players
+)
+
+st.session_state.injured_players = selected_injured
+
+# For each selected injured player, capture a status and a limited % (if limited)
+injury_settings = {}
+for pname in selected_injured:
+    # unique keys for each player's controls
+    status_key = f"status_{pname}"
+    limited_pct_key = f"limited_pct_{pname}"
+
+    # default status stored
+    if status_key not in st.session_state:
+        st.session_state[status_key] = "Limited"  # default to limited for convenience
+
+    status = st.selectbox(
+        f"Status for {pname}",
+        options=["Limited", "Out"],
+        index=0 if st.session_state[status_key] == "Limited" else 1,
+        key=status_key
+    )
+    st.session_state[status_key] = status
+
+    limited_pct = 0
+    if status == "Limited":
+        if limited_pct_key not in st.session_state:
+            st.session_state[limited_pct_key] = 15  # default 15% reduction
+        limited_pct = st.slider(
+            f"Minutes/usage reduction % for {pname}",
+            min_value=5,
+            max_value=60,
+            value=int(st.session_state[limited_pct_key]),
+            step=1,
+            key=limited_pct_key
+        )
+        st.session_state[limited_pct_key] = limited_pct
+
+    injury_settings[pname] = {"status": status, "limited_pct": limited_pct}
+
+st.caption("When a player is 'Out' their usage is removed and redistributed proportionally to teammates. 'Limited' reduces their usage and redistributes the lost portion to teammates.")
+
+# ---------------------------------------------------
+# Apply injury adjustments: compute adjusted_usage_map
+# ---------------------------------------------------
+# Start from base usages
+usage_map = {p: float(player_ratings[p].get("usage", 0.0)) for p in players_today}
+
+# Helper function to redistribute lost usage for a team
+def redistribute_lost_usage(team_players, usage_map_local, lost_usage):
+    """
+    Distribute lost_usage among the provided team_players (list of names),
+    proportionally to their current usage values. If all usages are zero,
+    split equally.
+    """
+    # compute current usages for eligible teammates
+    current_usages = np.array([usage_map_local.get(p, 0.0) for p in team_players], dtype=float)
+    total = current_usages.sum()
+    if total <= 0:
+        # equal split
+        per = lost_usage / max(1, len(team_players))
+        for p in team_players:
+            usage_map_local[p] = usage_map_local.get(p, 0.0) + per
+        return usage_map_local
+
+    shares = current_usages / total
+    for p, share in zip(team_players, shares):
+        usage_map_local[p] = usage_map_local.get(p, 0.0) + lost_usage * float(share)
+
+    return usage_map_local
+
+# Apply injuries per team
+# Group players by team
+team_players_map = {}
+for p in players_today:
+    team_players_map.setdefault(player_ratings[p]["team"], []).append(p)
+
+# We'll modify a local copy of usage_map
+adjusted_usage = usage_map.copy()
+
+# Iterate selected injured players, compute lost usage, and redistribute to teammates
+for pname, settings in injury_settings.items():
+    if pname not in adjusted_usage:
+        continue
+    team = player_ratings[pname]["team"]
+    teammates = [x for x in team_players_map.get(team, []) if x != pname]
+    if settings["status"] == "Out":
+        lost = adjusted_usage.get(pname, 0.0)
+        adjusted_usage[pname] = 0.0
+        if teammates and lost > 0:
+            adjusted_usage = redistribute_lost_usage(teammates, adjusted_usage, lost)
+    elif settings["status"] == "Limited":
+        pct = float(settings.get("limited_pct", 0.0)) / 100.0
+        orig = adjusted_usage.get(pname, 0.0)
+        lost = orig * pct
+        adjusted_usage[pname] = orig * (1.0 - pct)
+        if teammates and lost > 0:
+            adjusted_usage = redistribute_lost_usage(teammates, adjusted_usage, lost)
+
+# For clarity show a small table of usage adjustments
+usage_df = pd.DataFrame([{
+    "Player": p,
+    "Team": player_ratings[p]["team"],
+    "Orig Usage": round(usage_map.get(p, 0.0), 3),
+    "Adj Usage": round(adjusted_usage.get(p, 0.0), 3)
+} for p in players_today])
+st.write("### Usage adjustments (original → adjusted)")
+st.dataframe(usage_df, width="stretch")
+
+# ---------------------------------------------------
 # Correlated Monte Carlo Game Simulation
 # ---------------------------------------------------
-st.subheader("Game Market Simulator")
+st.subheader("Game Simulation (correlated scores)")
 
 if "n_sims" not in st.session_state:
     st.session_state.n_sims = 15000
@@ -100,8 +234,6 @@ n_sims = st.slider("Simulation Runs", 5000, 50000, st.session_state.n_sims, step
 
 home_sd = get_team_sd(home_mean)
 away_sd = get_team_sd(away_mean)
-
-# Correlation between team scores (pace/tempo/game script)
 rho = 0.30
 cov = [
     [home_sd**2, rho * home_sd * away_sd],
@@ -111,203 +243,17 @@ cov = [
 samples = np.random.multivariate_normal([home_mean, away_mean], cov, n_sims)
 home_scores = samples[:, 0]
 away_scores = samples[:, 1]
-
 margins = home_scores - away_scores
 totals = home_scores + away_scores
 
-st.subheader("Game Market Simulator")
+# ---------------------------------------------------
+# Market selector (with side toggles)
+# ---------------------------------------------------
+market_type = st.selectbox("Market Type", ["Moneyline", "Spread", "Total"], key="market_type")
 
-market_type = st.selectbox(
-    "Market Type",
-    ["Moneyline", "Spread", "Total"]
-)
-
-# Persist odds
+# Persist odds and lines
 if "odds_input" not in st.session_state:
     st.session_state.odds_input = -110
-
-odds_input = st.number_input(
-    "American Odds",
-    value=int(st.session_state.odds_input),
-    key="odds_input"
-)
-
-ev = 0.0
-
-# -------------------
-# MONEYLINE
-# -------------------
-if market_type == "Moneyline":
-
-    side = st.radio("Select Side", ["Home", "Away"])
-
-    home_prob = float(np.mean(margins > 0))
-    away_prob = 1.0 - home_prob
-
-    if side == "Home":
-        prob = home_prob
-        st.write(f"Home Win Probability: **{prob*100:.2f}%**")
-    else:
-        prob = away_prob
-        st.write(f"Away Win Probability: **{prob*100:.2f}%**")
-
-    ev = calculate_ev(prob, odds_input)
-
-# -------------------
-# SPREAD
-# -------------------
-elif market_type == "Spread":
-
-    if "spread_line" not in st.session_state:
-        st.session_state.spread_line = -5.5
-
-    spread_line = st.number_input(
-        "Spread Line (Home perspective)",
-        value=float(st.session_state.spread_line),
-        key="spread_line"
-    )
-
-    side = st.radio("Select Side", ["Home", "Away"])
-
-    home_cover_prob = float(np.mean(margins > spread_line))
-    away_cover_prob = 1.0 - home_cover_prob
-
-    if side == "Home":
-        prob = home_cover_prob
-        st.write(f"Home Cover Probability: **{prob*100:.2f}%**")
-    else:
-        prob = away_cover_prob
-        st.write(f"Away Cover Probability: **{prob*100:.2f}%**")
-
-    ev = calculate_ev(prob, odds_input)
-
-# -------------------
-# TOTAL
-# -------------------
-elif market_type == "Total":
-
-    default_total = round(float(np.mean(totals)), 1)
-
-    if "total_line" not in st.session_state:
-        st.session_state.total_line = default_total
-
-    total_line = st.number_input(
-        "Total Line",
-        value=float(st.session_state.total_line),
-        key="total_line"
-    )
-
-    side = st.radio("Select Side", ["Over", "Under"])
-
-    over_prob = float(np.mean(totals > total_line))
-    under_prob = 1.0 - over_prob
-
-    if side == "Over":
-        prob = over_prob
-        st.write(f"Over Probability: **{prob*100:.2f}%**")
-    else:
-        prob = under_prob
-        st.write(f"Under Probability: **{prob*100:.2f}%**")
-
-    ev = calculate_ev(prob, odds_input)
-
-st.write(f"### EV: **{ev:.3f} units**")
-
-st.divider()
-
-# ---------------------------------------------------
-# Player Prop Batch Monte Carlo
-# ---------------------------------------------------
-st.subheader("Player Prop Batch Monte Carlo")
-
-stat_choice = st.selectbox("Stat", ["pts", "reb", "ast", "3pm", "PRA"], key="stat_choice")
-
-# Persist prop inputs
-if "prop_line" not in st.session_state:
-    st.session_state.prop_line = 20.5
-if "prop_odds" not in st.session_state:
-    st.session_state.prop_odds = -110
-
-prop_line = st.number_input("Sportsbook Line", value=float(st.session_state.prop_line), key="prop_line")
-prop_odds = st.number_input("American Odds (Prop)", value=int(st.session_state.prop_odds), key="prop_odds")
-
-injury_impact = st.slider("Injury Impact (%)", 0, 20, 0, key="injury_impact")
-b2b = st.checkbox("Back-to-Back Game?", key="b2b")
-
-players_today = [
-    p for p, data in player_ratings.items()
-    if data.get("team") in [home_team, away_team]
-]
-
-if not players_today:
-    st.error(f"No players found for {home_team} or {away_team}. Check player_ratings.json team names.")
-    st.stop()
-
-results = []
-
-for player_name in players_today:
-    player = player_ratings[player_name]
-    team = player.get("team", "")
-    team_data = team_ratings.get(team, default_team)
-
-    base = float(player.get(stat_choice, 0))
-
-    # Usage scaling by stat type (more realistic)
-    usage = float(player.get("usage", 0))
-
-    if stat_choice == "pts":
-        proj = base * (1 + usage)
-    elif stat_choice == "ast":
-        proj = base * (1 + usage * 0.7)
-    elif stat_choice == "reb":
-        proj = base * (1 + usage * 0.25)
-    elif stat_choice == "3pm":
-        proj = base * (1 + usage * 0.4)
-    elif stat_choice == "PRA":
-        proj = base * (1 + usage * 0.6)
-    else:
-        proj = base
-
-    proj *= float(team_data.get("off", 114)) / 114.0
-    proj *= float(team_data.get("pace", 100)) / 100.0
-
-    if b2b:
-        proj *= 0.97
-
-    proj *= (1 - injury_impact / 100.0)
-
-    # Stat-specific SD
-    vol = float(team_data.get("volatility", 1.0))
-    if stat_choice == "3pm":
-        sd = 1.2 * vol
-    elif stat_choice == "ast":
-        sd = 2.2 * vol
-    elif stat_choice == "reb":
-        sd = 2.6 * vol
-    else:  # pts or PRA
-        sd = 3.2 * vol
-
-    sims = np.random.normal(proj, sd, n_sims)
-
-    # ✅ Correct probability vs sportsbook line
-    prob_over = float(np.mean(sims >= prop_line))
-    prob_under = 1.0 - prob_over
-
-    ev_over = calculate_ev(prob_over, int(prop_odds))
-    ev_under = calculate_ev(prob_under, int(prop_odds))
-
-    results.append({
-        "Player": player_name,
-        "Team": team,
-        "Projection": round(proj, 2),
-        "Over %": round(prob_over * 100, 2),
-        "Under %": round(prob_under * 100, 2),
-        "EV Over": round(ev_over, 3),
-        "EV Under": round(ev_under, 3)
-    })
-
-df = pd.DataFrame(results)
-df = df.sort_values(by="EV Over", ascending=False)
-
-st.dataframe(df, width="stretch")
-st.caption("Game sim uses correlated scoring; props include usage, pace, volatility, injury, and B2B adjustments.")
+if "spread_line" not in st.session_state:
+    st.session_state.spread_line = -5.5
+if "total
