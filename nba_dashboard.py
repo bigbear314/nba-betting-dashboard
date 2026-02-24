@@ -115,52 +115,103 @@ away_scores = samples[:, 1]
 margins = home_scores - away_scores
 totals = home_scores + away_scores
 
-market_type = st.selectbox("Market Type", ["Moneyline", "Spread", "Total"], key="market_type")
+st.subheader("Game Market Simulator")
 
-# Persist odds per market
+market_type = st.selectbox(
+    "Market Type",
+    ["Moneyline", "Spread", "Total"]
+)
+
+# Persist odds
 if "odds_input" not in st.session_state:
     st.session_state.odds_input = -110
 
-odds_input = st.number_input("American Odds", value=int(st.session_state.odds_input), key="odds_input")
+odds_input = st.number_input(
+    "American Odds",
+    value=int(st.session_state.odds_input),
+    key="odds_input"
+)
 
-# Default computed total for first load
-default_total = round(float(np.mean(totals)), 1)
+ev = 0.0
 
-# Session-state for lines so they do NOT reset
-if "spread_line" not in st.session_state:
-    st.session_state.spread_line = -5.5
-if "total_line" not in st.session_state:
-    st.session_state.total_line = default_total
-
-ev = 0.0  # ensure exists
-
+# -------------------
+# MONEYLINE
+# -------------------
 if market_type == "Moneyline":
-    home_prob = float(np.mean(margins > 0))
-    st.write(f"Home Win Probability: **{home_prob*100:.2f}%**")
-    ev = calculate_ev(home_prob, int(odds_input))
 
+    side = st.radio("Select Side", ["Home", "Away"])
+
+    home_prob = float(np.mean(margins > 0))
+    away_prob = 1.0 - home_prob
+
+    if side == "Home":
+        prob = home_prob
+        st.write(f"Home Win Probability: **{prob*100:.2f}%**")
+    else:
+        prob = away_prob
+        st.write(f"Away Win Probability: **{prob*100:.2f}%**")
+
+    ev = calculate_ev(prob, odds_input)
+
+# -------------------
+# SPREAD
+# -------------------
 elif market_type == "Spread":
+
+    if "spread_line" not in st.session_state:
+        st.session_state.spread_line = -5.5
+
     spread_line = st.number_input(
         "Spread Line (Home perspective)",
         value=float(st.session_state.spread_line),
         key="spread_line"
     )
-    home_cover_prob = float(np.mean(margins > spread_line))
-    st.write(f"Home Cover Probability: **{home_cover_prob*100:.2f}%**")
-    ev = calculate_ev(home_cover_prob, int(odds_input))
 
+    side = st.radio("Select Side", ["Home", "Away"])
+
+    home_cover_prob = float(np.mean(margins > spread_line))
+    away_cover_prob = 1.0 - home_cover_prob
+
+    if side == "Home":
+        prob = home_cover_prob
+        st.write(f"Home Cover Probability: **{prob*100:.2f}%**")
+    else:
+        prob = away_cover_prob
+        st.write(f"Away Cover Probability: **{prob*100:.2f}%**")
+
+    ev = calculate_ev(prob, odds_input)
+
+# -------------------
+# TOTAL
+# -------------------
 elif market_type == "Total":
+
+    default_total = round(float(np.mean(totals)), 1)
+
+    if "total_line" not in st.session_state:
+        st.session_state.total_line = default_total
+
     total_line = st.number_input(
         "Total Line",
         value=float(st.session_state.total_line),
         key="total_line"
     )
+
+    side = st.radio("Select Side", ["Over", "Under"])
+
     over_prob = float(np.mean(totals > total_line))
-    st.write(f"Over Probability: **{over_prob*100:.2f}%**")
-    ev = calculate_ev(over_prob, int(odds_input))
+    under_prob = 1.0 - over_prob
+
+    if side == "Over":
+        prob = over_prob
+        st.write(f"Over Probability: **{prob*100:.2f}%**")
+    else:
+        prob = under_prob
+        st.write(f"Under Probability: **{prob*100:.2f}%**")
+
+    ev = calculate_ev(prob, odds_input)
 
 st.write(f"### EV: **{ev:.3f} units**")
-st.write(f"Projected Means — Home: {home_mean:.1f} | Away: {away_mean:.1f} | Total: {(home_mean+away_mean):.1f}")
 
 st.divider()
 
