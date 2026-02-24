@@ -11,46 +11,50 @@ st.title("🏀 NBA Pro Monte Carlo Betting Dashboard")
 # ---------------------------------------------------
 # Utility Functions
 # ---------------------------------------------------
-
-def american_to_profit(odds):
+def american_to_profit(odds: int) -> float:
+    """Profit per 1 unit stake (excludes stake)."""
     if odds > 0:
-        return odds / 100
-    return 100 / abs(odds)
+        return odds / 100.0
+    return 100.0 / abs(odds)
 
-def calculate_ev(prob, odds):
+def calculate_ev(prob: float, odds: int) -> float:
+    """EV in units per 1 unit stake."""
     profit = american_to_profit(odds)
     return (prob * profit) - (1 - prob)
 
-def get_team_sd(mean):
-    base_sd = 11
-    return base_sd * (mean / 110)
+def get_team_sd(mean_points: float) -> float:
+    """Calibrated NBA-ish team score SD."""
+    base_sd = 11.0
+    return base_sd * (mean_points / 110.0)
 
 # ---------------------------------------------------
 # Load JSON Data
 # ---------------------------------------------------
-
 try:
     with open("team_ratings.json") as f:
         team_ratings = json.load(f)
-except:
-    st.error("Error loading team_ratings.json")
+except Exception as e:
+    st.error(f"Error loading team_ratings.json: {e}")
     st.stop()
 
 try:
     with open("player_ratings.json") as f:
         player_ratings = json.load(f)
-except:
-    st.error("Error loading player_ratings.json")
+except Exception as e:
+    st.error(f"Error loading player_ratings.json: {e}")
     st.stop()
 
 default_team = {"off": 114, "def": 114, "pace": 100, "volatility": 1.0}
 
 # ---------------------------------------------------
-# Get Today's Games
+# Detect Today's Slate
 # ---------------------------------------------------
-
-today = datetime.today().strftime('%Y-%m-%d')
-scoreboard = scoreboardv3.ScoreboardV3(game_date=today).get_dict()
+today = datetime.today().strftime("%Y-%m-%d")
+try:
+    scoreboard = scoreboardv3.ScoreboardV3(game_date=today).get_dict()
+except Exception as e:
+    st.error(f"Could not load today's games: {e}")
+    st.stop()
 
 games = []
 for game in scoreboard.get("scoreboard", {}).get("games", []):
@@ -64,142 +68,165 @@ if not games:
 
 selected_game = st.selectbox("Select Game", games)
 away_team, home_team = selected_game.split(" @ ")
-
 st.write(f"### {away_team} @ {home_team}")
 
 # ---------------------------------------------------
-# Team Projections
+# Team Mean Projections (inputs to game simulation)
 # ---------------------------------------------------
-
 away_data = team_ratings.get(away_team, default_team)
 home_data = team_ratings.get(home_team, default_team)
 
-avg_pace = (away_data["pace"] + home_data["pace"]) / 2
+avg_pace = (away_data["pace"] + home_data["pace"]) / 2.0
 
-away_proj = (away_data["off"]/114)*(home_data["def"]/114)*112
-home_proj = (home_data["off"]/114)*(away_data["def"]/114)*112
+away_mean = (away_data["off"] / 114.0) * (home_data["def"] / 114.0) * 112.0
+home_mean = (home_data["off"] / 114.0) * (away_data["def"] / 114.0) * 112.0
 
-away_proj *= avg_pace/100
-home_proj *= avg_pace/100
+away_mean *= avg_pace / 100.0
+home_mean *= avg_pace / 100.0
 
-home_proj *= 1.025
-away_proj *= 0.975
+# Home court
+home_mean *= 1.025
+away_mean *= 0.975
 
 # ---------------------------------------------------
-# Monte Carlo Simulation (Correlated)
+# Correlated Monte Carlo Game Simulation
 # ---------------------------------------------------
+st.subheader("Game Market Simulator")
 
-n_sims = st.slider("Simulation Runs", 5000, 50000, 15000, step=5000)
+if "n_sims" not in st.session_state:
+    st.session_state.n_sims = 15000
 
-home_sd = get_team_sd(home_proj)
-away_sd = get_team_sd(away_proj)
+n_sims = st.slider("Simulation Runs", 5000, 50000, st.session_state.n_sims, step=5000, key="n_sims")
 
-correlation = 0.30
+home_sd = get_team_sd(home_mean)
+away_sd = get_team_sd(away_mean)
 
-cov_matrix = [
-    [home_sd**2, correlation * home_sd * away_sd],
-    [correlation * home_sd * away_sd, away_sd**2]
+# Correlation between team scores (pace/tempo/game script)
+rho = 0.30
+cov = [
+    [home_sd**2, rho * home_sd * away_sd],
+    [rho * home_sd * away_sd, away_sd**2]
 ]
 
-means = [home_proj, away_proj]
-
-samples = np.random.multivariate_normal(means, cov_matrix, n_sims)
-
-home_scores = samples[:,0]
-away_scores = samples[:,1]
+samples = np.random.multivariate_normal([home_mean, away_mean], cov, n_sims)
+home_scores = samples[:, 0]
+away_scores = samples[:, 1]
 
 margins = home_scores - away_scores
 totals = home_scores + away_scores
 
-# ---------------------------------------------------
-# Market Selection
-# ---------------------------------------------------
+market_type = st.selectbox("Market Type", ["Moneyline", "Spread", "Total"], key="market_type")
 
-st.subheader("Game Market Simulator")
+# Persist odds per market
+if "odds_input" not in st.session_state:
+    st.session_state.odds_input = -110
 
-market_type = st.selectbox("Market Type", ["Moneyline", "Spread", "Total"])
-odds_input = st.number_input("American Odds", value=-110)
+odds_input = st.number_input("American Odds", value=int(st.session_state.odds_input), key="odds_input")
 
-if market_type == "Moneyline":
+# Default computed total for first load
+default_total = round(float(np.mean(totals)), 1)
 
-    home_prob = np.mean(margins > 0)
-    away_prob = 1 - home_prob
-
-    st.write(f"Home Win Probability: {home_prob*100:.2f}%")
-    ev = calculate_ev(home_prob, odds_input)
-
-elif market_type == "Spread":
-
-    spread_line = st.number_input("Spread Line (Home perspective)", value=-5.5)
-    home_cover = np.mean(margins > spread_line)
-
-    st.write(f"Home Cover Probability: {home_cover*100:.2f}%")
-    ev = calculate_ev(home_cover, odds_input)
-
-elif market_type == "Total":
-
-default_total = round(np.mean(totals), 1)
-
+# Session-state for lines so they do NOT reset
+if "spread_line" not in st.session_state:
+    st.session_state.spread_line = -5.5
 if "total_line" not in st.session_state:
     st.session_state.total_line = default_total
 
-total_line = st.number_input(
-    "Total Line",
-    value=st.session_state.total_line,
-    key="total_line"
-)
-    over_prob = np.mean(totals > total_line)
+ev = 0.0  # ensure exists
 
-    st.write(f"Over Probability: {over_prob*100:.2f}%")
-    ev = calculate_ev(over_prob, odds_input)
+if market_type == "Moneyline":
+    home_prob = float(np.mean(margins > 0))
+    st.write(f"Home Win Probability: **{home_prob*100:.2f}%**")
+    ev = calculate_ev(home_prob, int(odds_input))
 
-st.write(f"### EV: {ev:.3f} units")
+elif market_type == "Spread":
+    spread_line = st.number_input(
+        "Spread Line (Home perspective)",
+        value=float(st.session_state.spread_line),
+        key="spread_line"
+    )
+    home_cover_prob = float(np.mean(margins > spread_line))
+    st.write(f"Home Cover Probability: **{home_cover_prob*100:.2f}%**")
+    ev = calculate_ev(home_cover_prob, int(odds_input))
+
+elif market_type == "Total":
+    total_line = st.number_input(
+        "Total Line",
+        value=float(st.session_state.total_line),
+        key="total_line"
+    )
+    over_prob = float(np.mean(totals > total_line))
+    st.write(f"Over Probability: **{over_prob*100:.2f}%**")
+    ev = calculate_ev(over_prob, int(odds_input))
+
+st.write(f"### EV: **{ev:.3f} units**")
+st.write(f"Projected Means — Home: {home_mean:.1f} | Away: {away_mean:.1f} | Total: {(home_mean+away_mean):.1f}")
 
 st.divider()
 
 # ---------------------------------------------------
-# Player Prop Monte Carlo
+# Player Prop Batch Monte Carlo
 # ---------------------------------------------------
+st.subheader("Player Prop Batch Monte Carlo")
 
-st.subheader("Player Prop Monte Carlo")
+stat_choice = st.selectbox("Stat", ["pts", "reb", "ast", "3pm", "PRA"], key="stat_choice")
 
-stat_choice = st.selectbox("Stat", ["pts", "reb", "ast", "3pm", "PRA"])
-prop_line = st.number_input("Sportsbook Line", value=20.5)
-prop_odds = st.number_input("American Odds (Prop)", value=-110)
+# Persist prop inputs
+if "prop_line" not in st.session_state:
+    st.session_state.prop_line = 20.5
+if "prop_odds" not in st.session_state:
+    st.session_state.prop_odds = -110
 
-injury_impact = st.slider("Injury Impact (%)", 0, 20, 0)
-b2b = st.checkbox("Back-to-Back Game?")
+prop_line = st.number_input("Sportsbook Line", value=float(st.session_state.prop_line), key="prop_line")
+prop_odds = st.number_input("American Odds (Prop)", value=int(st.session_state.prop_odds), key="prop_odds")
+
+injury_impact = st.slider("Injury Impact (%)", 0, 20, 0, key="injury_impact")
+b2b = st.checkbox("Back-to-Back Game?", key="b2b")
 
 players_today = [
     p for p, data in player_ratings.items()
-    if data["team"] in [home_team, away_team]
+    if data.get("team") in [home_team, away_team]
 ]
 
 if not players_today:
-    st.error("No players found for selected teams.")
+    st.error(f"No players found for {home_team} or {away_team}. Check player_ratings.json team names.")
     st.stop()
 
 results = []
 
 for player_name in players_today:
     player = player_ratings[player_name]
-    team = player["team"]
+    team = player.get("team", "")
     team_data = team_ratings.get(team, default_team)
 
-    base = player.get(stat_choice, 0)
-    usage_boost = base * player.get("usage", 0)
+    base = float(player.get(stat_choice, 0))
 
-    proj = base + usage_boost
-    proj *= team_data["off"]/114
-    proj *= team_data["pace"]/100
+    # Usage scaling by stat type (more realistic)
+    usage = float(player.get("usage", 0))
+
+    if stat_choice == "pts":
+        proj = base * (1 + usage)
+    elif stat_choice == "ast":
+        proj = base * (1 + usage * 0.7)
+    elif stat_choice == "reb":
+        proj = base * (1 + usage * 0.25)
+    elif stat_choice == "3pm":
+        proj = base * (1 + usage * 0.4)
+    elif stat_choice == "PRA":
+        proj = base * (1 + usage * 0.6)
+    else:
+        proj = base
+
+    proj *= float(team_data.get("off", 114)) / 114.0
+    proj *= float(team_data.get("pace", 100)) / 100.0
 
     if b2b:
         proj *= 0.97
 
-    proj *= 1 - injury_impact/100
+    proj *= (1 - injury_impact / 100.0)
 
-    vol = team_data.get("volatility", 1)
-
+    # Stat-specific SD
+    vol = float(team_data.get("volatility", 1.0))
     if stat_choice == "3pm":
         sd = 1.2 * vol
     elif stat_choice == "ast":
@@ -211,23 +238,25 @@ for player_name in players_today:
 
     sims = np.random.normal(proj, sd, n_sims)
 
-    prob_over = np.mean(sims >= prop_line)
-    prob_under = 1 - prob_over
+    # ✅ Correct probability vs sportsbook line
+    prob_over = float(np.mean(sims >= prop_line))
+    prob_under = 1.0 - prob_over
 
-    ev_over = calculate_ev(prob_over, prop_odds)
-    ev_under = calculate_ev(prob_under, prop_odds)
+    ev_over = calculate_ev(prob_over, int(prop_odds))
+    ev_under = calculate_ev(prob_under, int(prop_odds))
 
     results.append({
         "Player": player_name,
         "Team": team,
-        "Projection": round(proj,2),
-        "Over %": round(prob_over*100,2),
-        "Under %": round(prob_under*100,2),
-        "EV Over": round(ev_over,3),
-        "EV Under": round(ev_under,3)
+        "Projection": round(proj, 2),
+        "Over %": round(prob_over * 100, 2),
+        "Under %": round(prob_under * 100, 2),
+        "EV Over": round(ev_over, 3),
+        "EV Under": round(ev_under, 3)
     })
 
-df = pd.DataFrame(results).sort_values(by="EV Over", ascending=False)
+df = pd.DataFrame(results)
+df = df.sort_values(by="EV Over", ascending=False)
 
 st.dataframe(df, width="stretch")
-st.caption("Model includes pace, usage, volatility, injury adjustments, and correlated scoring.")
+st.caption("Game sim uses correlated scoring; props include usage, pace, volatility, injury, and B2B adjustments.")
