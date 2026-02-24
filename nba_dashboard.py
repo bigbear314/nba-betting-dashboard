@@ -1,4 +1,3 @@
-# app_with_injury_redistribution.py
 import streamlit as st
 import json
 import numpy as np
@@ -69,7 +68,7 @@ away_team, home_team = selected_game.split(" @ ")
 st.write(f"### {away_team} @ {home_team}")
 
 # ---------------------------------------------------
-# Team Mean Projections (inputs to game simulation)
+# Team Mean Projections
 # ---------------------------------------------------
 away_data = team_ratings.get(away_team, default_team)
 home_data = team_ratings.get(home_team, default_team)
@@ -86,7 +85,7 @@ home_mean *= 1.025
 away_mean *= 0.975
 
 # ---------------------------------------------------
-# Build players_today list (rotation players in data)
+# Players in this game
 # ---------------------------------------------------
 players_today = [
     p for p, d in player_ratings.items()
@@ -97,113 +96,88 @@ if not players_today:
     st.error(f"No players found for {home_team} or {away_team}. Check player_ratings.json team names.")
     st.stop()
 
-# Create a small helper map for quick lookup
-players_info = {p: player_ratings[p] for p in players_today}
-
 # ---------------------------------------------------
-# Injury Manager UI
+# Injury Manager (SAFE session_state usage)
 # ---------------------------------------------------
 st.subheader("Injury Manager (affects usage & projections)")
 
-# Persist injured players selection in session_state to avoid reset
-if "injured_players" not in st.session_state:
-    st.session_state.injured_players = []
-
-# Multiselect to pick injured/limited players from today's rotation
 selected_injured = st.multiselect(
-    "Select players to mark as Limited/Out (choose any number):",
+    "Select players to mark as Limited/Out:",
     options=players_today,
-    default=st.session_state.injured_players
+    default=st.session_state.get("injured_players", [])
 )
+st.session_state["injured_players"] = selected_injured
 
-st.session_state.injured_players = selected_injured
-
-# For each selected injured player, capture a status and a limited % (if limited)
 injury_settings = {}
-for pname in selected_injured:
-    # unique keys for each player's controls
-    status_key = f"status_{pname}"
-    limited_pct_key = f"limited_pct_{pname}"
 
-    # default status stored
+for pname in selected_injured:
+    status_key = f"status_{pname}"
+    limited_key = f"limited_pct_{pname}"
+
+    # Set defaults BEFORE widget creation
     if status_key not in st.session_state:
-        st.session_state[status_key] = "Limited"  # default to limited for convenience
+        st.session_state[status_key] = "Limited"
+    if limited_key not in st.session_state:
+        st.session_state[limited_key] = 15
 
     status = st.selectbox(
         f"Status for {pname}",
-        options=["Limited", "Out"],
-        index=0 if st.session_state[status_key] == "Limited" else 1,
+        ["Limited", "Out"],
         key=status_key
     )
-    st.session_state[status_key] = status
 
     limited_pct = 0
     if status == "Limited":
-        if limited_pct_key not in st.session_state:
-            st.session_state[limited_pct_key] = 15  # default 15% reduction
         limited_pct = st.slider(
             f"Minutes/usage reduction % for {pname}",
             min_value=5,
             max_value=60,
-            value=int(st.session_state[limited_pct_key]),
+            value=int(st.session_state[limited_key]),
             step=1,
-            key=limited_pct_key
+            key=limited_key
         )
-        st.session_state[limited_pct_key] = limited_pct
 
     injury_settings[pname] = {"status": status, "limited_pct": limited_pct}
 
-st.caption("When a player is 'Out' their usage is removed and redistributed proportionally to teammates. 'Limited' reduces their usage and redistributes the lost portion to teammates.")
+st.caption("Out removes usage and redistributes to teammates. Limited reduces usage and redistributes the lost portion.")
 
 # ---------------------------------------------------
-# Apply injury adjustments: compute adjusted_usage_map
+# Usage adjustment + redistribution
 # ---------------------------------------------------
-# Start from base usages
 usage_map = {p: float(player_ratings[p].get("usage", 0.0)) for p in players_today}
+adjusted_usage = usage_map.copy()
 
-# Helper function to redistribute lost usage for a team
+team_players_map = {}
+for p in players_today:
+    team_players_map.setdefault(player_ratings[p]["team"], []).append(p)
+
 def redistribute_lost_usage(team_players, usage_map_local, lost_usage):
-    """
-    Distribute lost_usage among the provided team_players (list of names),
-    proportionally to their current usage values. If all usages are zero,
-    split equally.
-    """
-    # compute current usages for eligible teammates
-    current_usages = np.array([usage_map_local.get(p, 0.0) for p in team_players], dtype=float)
-    total = current_usages.sum()
+    current = np.array([usage_map_local.get(p, 0.0) for p in team_players], dtype=float)
+    total = float(current.sum())
     if total <= 0:
-        # equal split
         per = lost_usage / max(1, len(team_players))
         for p in team_players:
             usage_map_local[p] = usage_map_local.get(p, 0.0) + per
         return usage_map_local
 
-    shares = current_usages / total
+    shares = current / total
     for p, share in zip(team_players, shares):
         usage_map_local[p] = usage_map_local.get(p, 0.0) + lost_usage * float(share)
-
     return usage_map_local
 
-# Apply injuries per team
-# Group players by team
-team_players_map = {}
-for p in players_today:
-    team_players_map.setdefault(player_ratings[p]["team"], []).append(p)
-
-# We'll modify a local copy of usage_map
-adjusted_usage = usage_map.copy()
-
-# Iterate selected injured players, compute lost usage, and redistribute to teammates
 for pname, settings in injury_settings.items():
     if pname not in adjusted_usage:
         continue
+
     team = player_ratings[pname]["team"]
     teammates = [x for x in team_players_map.get(team, []) if x != pname]
+
     if settings["status"] == "Out":
         lost = adjusted_usage.get(pname, 0.0)
         adjusted_usage[pname] = 0.0
         if teammates and lost > 0:
             adjusted_usage = redistribute_lost_usage(teammates, adjusted_usage, lost)
+
     elif settings["status"] == "Limited":
         pct = float(settings.get("limited_pct", 0.0)) / 100.0
         orig = adjusted_usage.get(pname, 0.0)
@@ -212,20 +186,21 @@ for pname, settings in injury_settings.items():
         if teammates and lost > 0:
             adjusted_usage = redistribute_lost_usage(teammates, adjusted_usage, lost)
 
-# For clarity show a small table of usage adjustments
 usage_df = pd.DataFrame([{
     "Player": p,
     "Team": player_ratings[p]["team"],
     "Orig Usage": round(usage_map.get(p, 0.0), 3),
-    "Adj Usage": round(adjusted_usage.get(p, 0.0), 3)
+    "Adj Usage": round(adjusted_usage.get(p, 0.0), 3),
 } for p in players_today])
 st.write("### Usage adjustments (original → adjusted)")
 st.dataframe(usage_df, width="stretch")
 
+st.divider()
+
 # ---------------------------------------------------
 # Correlated Monte Carlo Game Simulation
 # ---------------------------------------------------
-st.subheader("Game Simulation (correlated scores)")
+st.subheader("Game Market Simulator (correlated scores)")
 
 if "n_sims" not in st.session_state:
     st.session_state.n_sims = 15000
@@ -246,15 +221,127 @@ away_scores = samples[:, 1]
 margins = home_scores - away_scores
 totals = home_scores + away_scores
 
-# ---------------------------------------------------
-# Market selector (with side toggles)
-# ---------------------------------------------------
 market_type = st.selectbox("Market Type", ["Moneyline", "Spread", "Total"], key="market_type")
 
-# Persist odds and lines
+# Persist odds/lines defaults BEFORE widgets
 if "odds_input" not in st.session_state:
     st.session_state.odds_input = -110
 if "spread_line" not in st.session_state:
     st.session_state.spread_line = -5.5
 if "total_line" not in st.session_state:
     st.session_state.total_line = round(float(np.mean(totals)), 1)
+
+odds_input = st.number_input("American Odds", value=int(st.session_state.odds_input), key="odds_input")
+
+ev = 0.0
+
+if market_type == "Moneyline":
+    side = st.radio("Select Side", ["Home", "Away"], key="ml_side")
+    home_prob = float(np.mean(margins > 0))
+    away_prob = 1.0 - home_prob
+    prob = home_prob if side == "Home" else away_prob
+    st.write(f"{side} Win Probability: **{prob*100:.2f}%**")
+    ev = calculate_ev(prob, int(odds_input))
+
+elif market_type == "Spread":
+    spread_line = st.number_input("Spread Line (Home perspective)", value=float(st.session_state.spread_line), key="spread_line")
+    side = st.radio("Select Side", ["Home", "Away"], key="spread_side")
+    home_cover_prob = float(np.mean(margins > spread_line))
+    away_cover_prob = 1.0 - home_cover_prob
+    prob = home_cover_prob if side == "Home" else away_cover_prob
+    st.write(f"{side} Cover Probability: **{prob*100:.2f}%**")
+    ev = calculate_ev(prob, int(odds_input))
+
+elif market_type == "Total":
+    total_line = st.number_input("Total Line", value=float(st.session_state.total_line), key="total_line")
+    side = st.radio("Select Side", ["Over", "Under"], key="total_side")
+    over_prob = float(np.mean(totals > total_line))
+    under_prob = 1.0 - over_prob
+    prob = over_prob if side == "Over" else under_prob
+    st.write(f"{side} Probability: **{prob*100:.2f}%**")
+    ev = calculate_ev(prob, int(odds_input))
+
+st.write(f"### EV: **{ev:.3f} units**")
+st.write(f"Projected Means — Home: {home_mean:.1f} | Away: {away_mean:.1f} | Total: {(home_mean+away_mean):.1f}")
+
+st.divider()
+
+# ---------------------------------------------------
+# Player Prop Batch Monte Carlo (injury-aware usage)
+# ---------------------------------------------------
+st.subheader("Player Prop Batch Monte Carlo (injury-aware)")
+
+stat_choice = st.selectbox("Stat", ["pts", "reb", "ast", "3pm", "PRA"], key="stat_choice")
+
+if "prop_line" not in st.session_state:
+    st.session_state.prop_line = 20.5
+if "prop_odds" not in st.session_state:
+    st.session_state.prop_odds = -110
+
+prop_line = st.number_input("Sportsbook Line", value=float(st.session_state.prop_line), key="prop_line")
+prop_odds = st.number_input("American Odds (Prop)", value=int(st.session_state.prop_odds), key="prop_odds")
+
+b2b = st.checkbox("Back-to-Back Game?", key="b2b")
+
+results = []
+
+for player_name in players_today:
+    player = player_ratings[player_name]
+    team = player.get("team", "")
+    team_data = team_ratings.get(team, default_team)
+
+    base = float(player.get(stat_choice, 0))
+    u = float(adjusted_usage.get(player_name, float(player.get("usage", 0.0))))
+
+    if stat_choice == "pts":
+        proj = base * (1 + u)
+    elif stat_choice == "ast":
+        proj = base * (1 + u * 0.7)
+    elif stat_choice == "reb":
+        proj = base * (1 + u * 0.25)
+    elif stat_choice == "3pm":
+        proj = base * (1 + u * 0.4)
+    elif stat_choice == "PRA":
+        proj = base * (1 + u * 0.6)
+    else:
+        proj = base
+
+    proj *= float(team_data.get("off", 114)) / 114.0
+    proj *= float(team_data.get("pace", 100)) / 100.0
+
+    if b2b:
+        proj *= 0.97
+
+    vol = float(team_data.get("volatility", 1.0))
+    if stat_choice == "3pm":
+        sd = 1.2 * vol
+    elif stat_choice == "ast":
+        sd = 2.2 * vol
+    elif stat_choice == "reb":
+        sd = 2.6 * vol
+    else:
+        sd = 3.2 * vol
+
+    sims = np.random.normal(proj, sd, n_sims)
+
+    prob_over = float(np.mean(sims >= prop_line))
+    prob_under = 1.0 - prob_over
+
+    ev_over = calculate_ev(prob_over, int(prop_odds))
+    ev_under = calculate_ev(prob_under, int(prop_odds))
+
+    results.append({
+        "Player": player_name,
+        "Team": team,
+        "Orig Usage": round(usage_map.get(player_name, 0.0), 3),
+        "Adj Usage": round(adjusted_usage.get(player_name, 0.0), 3),
+        "Projection": round(proj, 2),
+        "Over %": round(prob_over * 100, 2),
+        "Under %": round(prob_under * 100, 2),
+        "EV Over": round(ev_over, 3),
+        "EV Under": round(ev_under, 3)
+    })
+
+df = pd.DataFrame(results).sort_values(by="EV Over", ascending=False)
+st.dataframe(df, width="stretch")
+st.caption("Model includes injury-aware usage redistribution, correlated scoring, B2B, and volatility adjustments.")
