@@ -211,5 +211,5 @@ for player_name in players_today:
 
 df = pd.DataFrame(results).sort_values(by="EV Over", ascending=False)
 
-st.dataframe(df, use_container_width=True)
+st.dataframe(df, width="stretch")
 st.caption("Model includes pace, usage, volatility, injury adjustments, and correlated scoring.")
