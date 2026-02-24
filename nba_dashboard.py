@@ -138,7 +138,16 @@ elif market_type == "Spread":
 
 elif market_type == "Total":
 
-    total_line = st.number_input("Total Line", value=round(np.mean(totals),1))
+default_total = round(np.mean(totals), 1)
+
+if "total_line" not in st.session_state:
+    st.session_state.total_line = default_total
+
+total_line = st.number_input(
+    "Total Line",
+    value=st.session_state.total_line,
+    key="total_line"
+)
     over_prob = np.mean(totals > total_line)
 
     st.write(f"Over Probability: {over_prob*100:.2f}%")
