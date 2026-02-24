@@ -256,4 +256,5 @@ if "odds_input" not in st.session_state:
     st.session_state.odds_input = -110
 if "spread_line" not in st.session_state:
     st.session_state.spread_line = -5.5
-if "total
+if "total_line" not in st.session_state:
+    st.session_state.total_line = round(float(np.mean(totals)), 1)
