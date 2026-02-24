@@ -207,8 +207,11 @@ if "n_sims" not in st.session_state:
 
 n_sims = st.slider("Simulation Runs", 5000, 50000, st.session_state.n_sims, step=5000, key="n_sims")
 
-home_sd = get_team_sd(home_mean)
-away_sd = get_team_sd(away_mean)
+home_vol = float(home_data.get("volatility", 1.0))
+away_vol = float(away_data.get("volatility", 1.0))
+
+home_sd = get_team_sd(home_mean) * home_vol
+away_sd = get_team_sd(away_mean) * away_vol
 rho = 0.30
 cov = [
     [home_sd**2, rho * home_sd * away_sd],
