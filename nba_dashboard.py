@@ -189,7 +189,16 @@ for player_name in players_today:
 
     proj *= 1 - injury_impact/100
 
-    sd = 3 * team_data.get("volatility",1)
+    vol = team_data.get("volatility", 1)
+
+    if stat_choice == "3pm":
+        sd = 1.2 * vol
+    elif stat_choice == "ast":
+        sd = 2.2 * vol
+    elif stat_choice == "reb":
+        sd = 2.6 * vol
+    else:  # pts or PRA
+        sd = 3.2 * vol
 
     sims = np.random.normal(proj, sd, n_sims)
 
