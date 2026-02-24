@@ -22,7 +22,7 @@
   "Grayson Allen": {"team": "Phoenix Suns", "pts": 17.3, "reb": 3.1, "ast": 3.9, "3pm": 3.4, "usage": 0.24},
   "Jalen Green": {"team": "Phoenix Suns", "pts": 13.3, "reb": 2.8, "ast": 2.4, "3pm": 2.0, "usage": 0.34},
   "Mark Williams": {"team": "Phoenix Suns", "pts": 11.9, "reb": 8.1, "ast": 1.0, "3pm": 0, "usage": 0.18},
-  "Connor Gillespie" {"team": "Phoenix Suns", "pts": 13.4, "reb": 4.1, "ast": 4.7, "3pm": 3.0, "usage": 0.19},
+  "Connor Gillespie": {"team": "Phoenix Suns", "pts": 13.4, "reb": 4.1, "ast": 4.7, "3pm": 3.0, "usage": 0.19},
   "Stephen Curry": {"team": "Golden State Warriors", "pts": 27.5, "reb": 5.1, "ast": 6.3, "3pm": 3.7, "usage": 0.33},
   "Nikola Jokić": {"team": "Denver Nuggets", "pts": 28.7, "reb": 12.6, "ast": 10.6, "3pm": 1.9, "usage": 0.31},
   "Tyrese Maxey": {"team": "Philadelphia 76ers", "pts": 29.0, "reb": 4, "ast": 6.7, "3pm": 3.3, "usage": 0.30},
