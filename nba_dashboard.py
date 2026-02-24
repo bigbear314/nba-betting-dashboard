@@ -154,7 +154,7 @@ st.divider()
 
 st.subheader("Player Prop Monte Carlo")
 
-stat_choice = st.selectbox("Stat", ["pts", "reb", "ast", "PRA"])
+stat_choice = st.selectbox("Stat", ["pts", "reb", "ast", "3pm", "PRA"])
 prop_line = st.number_input("Sportsbook Line", value=20.5)
 prop_odds = st.number_input("American Odds (Prop)", value=-110)
 
