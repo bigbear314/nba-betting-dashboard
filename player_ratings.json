@@ -31,18 +31,14 @@
   "OG Anunoby": {"team": "New York Knicks", "pts": 16.3, "reb": 5.4, "ast": 2.3, "3pm": 2.0, "usage": 0.20},
   "Mikal Bridges": {"team": "New York Knicks", "pts": 15.6, "reb": 4.2, "ast": 4, "3pm": 2.1, "usage": 0.18},
   "Cade Cunningham": {"team": "Detroit Pistons", "pts": 24.5, "reb": 6.0, "ast": 9.6, "3pm": 2.5, "usage": 0.31},
+  "Jalen Duren": {"team": "Detroit Pistons", "pts": 14.2, "reb": 10.4, "ast": 1.3, "3pm": 0.0, "usage": 0.26},
   "LaMelo Ball": {"team": "Charlotte Hornets", "pts": 20.3, "reb": 6.1, "ast": 8.2, "3pm": 2.0, "usage": 0.32},
   "Pascal Siakam": {"team": "Indiana Pacers", "pts": 22.4, "reb": 7.2, "ast": 5.0, "3pm": 1.8, "usage": 0.29},
   "Victor Wembanyama": {"team": "San Antonio Spurs", "pts": 22.0, "reb": 11.1, "ast": 3.1, "3pm": 2.3, "usage": 0.32},
-  
-  "Bam Adebayo": {"team": "Miami Heat", "pts": 18.0, "reb": 9.9, "ast": 3.1, "3pm": 0.4, "usage": 0.25},
-  "Nikola Vučević": {"team": "Boston Celtics", "pts": 20.0, "reb": 9.0, "ast": 3.0, "3pm": 1.5, "usage": 0.25},
-  "Alperen Şengün": {"team": "Houston Rockets", "pts": 19.0, "reb": 9.4, "ast": 5.0, "3pm": 0.7, "usage": 0.26},
-  "Jalen Duren": {"team": "Detroit Pistons", "pts": 14.2, "reb": 10.4, "ast": 1.3, "3pm": 0.0, "usage": 0.26},
-  "Amen Thompson": {"team": "Houston Rockets", "pts": 17.0, "reb": 7.3, "ast": 5.2, "3pm": 1.1, "usage": 0.27},
-  "Mikal Bridges": {"team": "New York Knicks", "pts": 16.6, "reb": 4.4, "ast": 4.3, "3pm": 2.2, "usage": 0.26},
-  "Tyrese Haliburton": {"team": "Indiana Pacers", "pts": 21.8, "reb": 4.3, "ast": 10.1, "3pm": 2.8, "usage": 0.30},
   "De'Aaron Fox": {"team": "San Antonio Spurs", "pts": 23.5, "reb": 3.8, "ast": 6.3, "3pm": 2.0, "usage": 0.26},
+  "Bam Adebayo": {"team": "Miami Heat", "pts": 18.0, "reb": 9.9, "ast": 3.1, "3pm": 0.4, "usage": 0.25},
+  "Alperen Şengün": {"team": "Houston Rockets", "pts": 19.0, "reb": 9.4, "ast": 5.0, "3pm": 0.7, "usage": 0.26},
+  "Amen Thompson": {"team": "Houston Rockets", "pts": 17.0, "reb": 7.3, "ast": 5.2, "3pm": 1.1, "usage": 0.27},
   "Michael Porter Jr.": {"team": "Brooklyn Nets", "pts": 19.7, "reb": 6.5, "ast": 2.3, "3pm": 2.9, "usage": 0.28},
   "Jabari Smith Jr.": {"team": "Houston Rockets", "pts": 15.0, "reb": 5.2, "ast": 1.8, "3pm": 1.9, "usage": 0.27}
 }
