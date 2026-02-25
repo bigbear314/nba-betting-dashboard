@@ -3,6 +3,8 @@ import json
 import pytz
 import numpy as np
 import pandas as pd
+def normalize_team_name(name: str) -> str:
+    return (name or "").strip().lower()
 from nba_api.stats.endpoints import scoreboardv3
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -95,9 +97,12 @@ away_mean *= 0.975
 # ---------------------------------------------------
 # Players in this game
 # ---------------------------------------------------
+home_norm = normalize_team_name(home_team)
+away_norm = normalize_team_name(away_team)
+
 players_today = [
     p for p, d in player_ratings.items()
-    if d.get("team") in [home_team, away_team]
+    if normalize_team_name(d.get("team")) in [home_norm, away_norm]
 ]
 
 if not players_today:
