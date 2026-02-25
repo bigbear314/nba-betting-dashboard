@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from nba_api.stats.endpoints import scoreboardv3
 from datetime import datetime
-
+from zoneinfo import ZoneInfo
 st.set_page_config(page_title="NBA Pro Monte Carlo Dashboard (Injury-aware)", layout="centered")
 st.title("🏀 NBA Pro Monte Carlo Betting Dashboard (Injury-aware)")
 
