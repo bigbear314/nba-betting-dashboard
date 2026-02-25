@@ -47,7 +47,7 @@ default_team = {"off": 114, "def": 114, "pace": 100, "volatility": 1.0}
 # ---------------------------------------------------
 # Detect Today's Slate
 # ---------------------------------------------------
-game_date = st.date_input("Game Date", datetime.now(ZoneInfo("America/Chicago")).date())
+game_date = st.date_input("Game Date", datetime.now(ZoneInfo("America/New_York")).date())
 today = game_date.strftime("%Y-%m-%d")
 scoreboard = scoreboardv3.ScoreboardV3(game_date=today).get_dict()
 try:
