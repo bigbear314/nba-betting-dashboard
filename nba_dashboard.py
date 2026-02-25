@@ -1,5 +1,6 @@
 import streamlit as st
 import json
+import pytz
 import numpy as np
 import pandas as pd
 from nba_api.stats.endpoints import scoreboardv3
@@ -46,7 +47,9 @@ default_team = {"off": 114, "def": 114, "pace": 100, "volatility": 1.0}
 # ---------------------------------------------------
 # Detect Today's Slate
 # ---------------------------------------------------
-today = datetime.today().strftime("%Y-%m-%d")
+game_date = st.date_input("Game Date", datetime.now(ZoneInfo("America/Chicago")).date())
+today = game_date.strftime("%Y-%m-%d")
+scoreboard = scoreboardv3.ScoreboardV3(game_date=today).get_dict()
 try:
     scoreboard = scoreboardv3.ScoreboardV3(game_date=today).get_dict()
 except Exception as e:
