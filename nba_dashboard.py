@@ -73,9 +73,8 @@ if not games:
     st.warning("No games today.")
     st.stop()
 
-selected_game = st.selectbox("Select Game", games)
-away_team, home_team = selected_game.split(" @ ")
-st.write(f"### {away_team} @ {home_team}")
+selected_game_clean = selected_game.split(" (")[0]
+away_team, home_team = selected_game_clean.split(" @ ")
 
 # ---------------------------------------------------
 # Team Mean Projections
