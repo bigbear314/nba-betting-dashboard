@@ -54,10 +54,15 @@ except Exception as e:
     st.stop()
 
 games = []
-for game in scoreboard.get("scoreboard", {}).get("games", []):
-    home = game["homeTeam"]["teamName"]
-    away = game["awayTeam"]["teamName"]
-    games.append(f"{away} @ {home}")
+game_objects = scoreboard.get("scoreboard", {}).get("games", [])
+
+for game in game_objects:
+    home = game.get("homeTeam", {}).get("teamName")
+    away = game.get("awayTeam", {}).get("teamName")
+    status = game.get("gameStatusText", "")
+
+    if home and away:
+        games.append(f"{away} @ {home} ({status})")
 
 if not games:
     st.warning("No games today.")
