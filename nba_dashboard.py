@@ -72,6 +72,8 @@ for game in game_objects:
 if not games:
     st.warning("No games today.")
     st.stop()
+    
+selected_game = st.selectbox("Select Game", games)
 
 selected_game_clean = selected_game.split(" (")[0]
 away_team, home_team = selected_game_clean.split(" @ ")
