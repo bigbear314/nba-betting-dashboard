@@ -435,63 +435,128 @@ b2b = st.checkbox("Back-to-Back Game?", key="b2b")
 
 results = []
 
-for player_name in players_today:
-    player = player_ratings[player_name]
-    team = player.get("team", "")
-    team_data = team_ratings.get(team, default_team)
+# Split players by team
+home_players = [p for p in players_today if player_ratings[p]["team"] == home_team]
+away_players = [p for p in players_today if player_ratings[p]["team"] == away_team]
 
-    base = float(player.get(stat_choice, 0))
-    u = float(adjusted_usage.get(player_name, float(player.get("usage", 0.0))))
+# ---- TEAM-CONSTRAINED POINTS MODEL ----
+if stat_choice == "pts":
+    # Use your correlated game sim team scores as team points sims
+    home_team_points_sims = np.array(home_scores, dtype=float)
+    away_team_points_sims = np.array(away_scores, dtype=float)
 
-    if stat_choice == "pts":
-        proj = base * (1 + u)
-    elif stat_choice == "ast":
-        proj = base * (1 + u * 0.7)
-    elif stat_choice == "reb":
-        proj = base * (1 + u * 0.25)
-    elif stat_choice == "3pm":
-        proj = base * (1 + u * 0.4)
-    elif stat_choice == "PRA":
-        proj = base * (1 + u * 0.6)
-    else:
-        proj = base
+    # Optional: small noise so not ALL points must be explained by players in your JSON
+    # (bench + unknown players). This prevents weird over-allocation if your JSON is incomplete.
+    # 0.85–0.95 works well depending on how complete your player list is.
+    TEAM_POINTS_COVERAGE = 0.90
+    home_team_points_sims *= TEAM_POINTS_COVERAGE
+    away_team_points_sims *= TEAM_POINTS_COVERAGE
 
-    proj *= float(team_data.get("off", 114)) / 114.0
-    proj *= float(team_data.get("pace", 100)) / 100.0
+    # Allocate each team's points to its players (negative correlation between teammates)
+    home_pts_matrix = team_constrained_points_sims(
+        home_team_points_sims, home_players, player_ratings, adjusted_usage, concentration=90
+    )
+    away_pts_matrix = team_constrained_points_sims(
+        away_team_points_sims, away_players, player_ratings, adjusted_usage, concentration=90
+    )
 
-    if b2b:
-        proj *= 0.97
+    # Compute probs/EV for each player vs the sportsbook line
+    for idx, pname in enumerate(home_players):
+        sims = home_pts_matrix[:, idx]
+        prob_over = float(np.mean(sims >= prop_line))
+        prob_under = 1.0 - prob_over
+        ev_over = calculate_ev(prob_over, int(prop_odds))
+        ev_under = calculate_ev(prob_under, int(prop_odds))
 
-    vol = float(team_data.get("volatility", 1.0))
-    if stat_choice == "3pm":
-        sd = 1.2 * vol
-    elif stat_choice == "ast":
-        sd = 2.2 * vol
-    elif stat_choice == "reb":
-        sd = 2.6 * vol
-    else:
-        sd = 3.2 * vol
+        results.append({
+            "Player": pname,
+            "Team": home_team,
+            "Orig Usage": round(float(usage_map.get(pname, 0.0)), 3),
+            "Adj Usage": round(float(adjusted_usage.get(pname, 0.0)), 3),
+            "Projection": round(float(np.mean(sims)), 2),
+            "Over %": round(prob_over * 100, 2),
+            "Under %": round(prob_under * 100, 2),
+            "EV Over": round(ev_over, 3),
+            "EV Under": round(ev_under, 3),
+        })
 
-    sims = np.random.normal(proj, sd, n_sims)
+    for idx, pname in enumerate(away_players):
+        sims = away_pts_matrix[:, idx]
+        prob_over = float(np.mean(sims >= prop_line))
+        prob_under = 1.0 - prob_over
+        ev_over = calculate_ev(prob_over, int(prop_odds))
+        ev_under = calculate_ev(prob_under, int(prop_odds))
 
-    prob_over = float(np.mean(sims >= prop_line))
-    prob_under = 1.0 - prob_over
+        results.append({
+            "Player": pname,
+            "Team": away_team,
+            "Orig Usage": round(float(usage_map.get(pname, 0.0)), 3),
+            "Adj Usage": round(float(adjusted_usage.get(pname, 0.0)), 3),
+            "Projection": round(float(np.mean(sims)), 2),
+            "Over %": round(prob_over * 100, 2),
+            "Under %": round(prob_under * 100, 2),
+            "EV Over": round(ev_over, 3),
+            "EV Under": round(ev_under, 3),
+        })
 
-    ev_over = calculate_ev(prob_over, int(prop_odds))
-    ev_under = calculate_ev(prob_under, int(prop_odds))
+# ---- KEEP EXISTING (INDEPENDENT) MODEL FOR OTHER STATS FOR NOW ----
+else:
+    for player_name in players_today:
+        player = player_ratings[player_name]
+        team = player.get("team", "")
+        team_data = team_ratings.get(team, default_team)
 
-    results.append({
-        "Player": player_name,
-        "Team": team,
-        "Orig Usage": round(usage_map.get(player_name, 0.0), 3),
-        "Adj Usage": round(adjusted_usage.get(player_name, 0.0), 3),
-        "Projection": round(proj, 2),
-        "Over %": round(prob_over * 100, 2),
-        "Under %": round(prob_under * 100, 2),
-        "EV Over": round(ev_over, 3),
-        "EV Under": round(ev_under, 3)
-    })
+        base = float(player.get(stat_choice, 0))
+        u = float(adjusted_usage.get(player_name, float(player.get("usage", 0.0))))
+
+        # usage scaling by stat (your current logic)
+        if stat_choice == "ast":
+            proj = base * (1 + u * 0.7)
+        elif stat_choice == "reb":
+            proj = base * (1 + u * 0.25)
+        elif stat_choice == "3pm":
+            proj = base * (1 + u * 0.4)
+        elif stat_choice == "PRA":
+            proj = base * (1 + u * 0.6)
+        else:
+            proj = base
+
+        proj *= float(team_data.get("off", 114)) / 114.0
+        proj *= float(team_data.get("pace", 100)) / 100.0
+
+        if b2b:
+            proj *= 0.97
+
+        vol = float(team_data.get("volatility", 1.0))
+        if stat_choice == "3pm":
+            sd = 1.2 * vol
+        elif stat_choice == "ast":
+            sd = 2.2 * vol
+        elif stat_choice == "reb":
+            sd = 2.6 * vol
+        else:
+            sd = 3.2 * vol
+
+        sims = np.random.normal(proj, sd, n_sims)
+
+        prob_over = float(np.mean(sims >= prop_line))
+        prob_under = 1.0 - prob_over
+
+        ev_over = calculate_ev(prob_over, int(prop_odds))
+        ev_under = calculate_ev(prob_under, int(prop_odds))
+
+        results.append({
+            "Player": player_name,
+            "Team": team,
+            "Orig Usage": round(float(usage_map.get(player_name, 0.0)), 3),
+            "Adj Usage": round(float(adjusted_usage.get(player_name, 0.0)), 3),
+            "Projection": round(float(proj), 2),
+            "Over %": round(prob_over * 100, 2),
+            "Under %": round(prob_under * 100, 2),
+            "EV Over": round(ev_over, 3),
+            "EV Under": round(ev_under, 3),
+        })
 
 df = pd.DataFrame(results).sort_values(by="EV Over", ascending=False)
 st.dataframe(df, width="stretch")
-st.caption("Model includes injury-aware usage redistribution, correlated scoring, B2B, and volatility adjustments.")
+st.caption("PTS uses team-constrained allocation (teammate negative correlation). Other stats still use independent sims (next upgrade).")
