@@ -1,13 +1,74 @@
 import streamlit as st
 import json
-import pytz
 import numpy as np
 import pandas as pd
+import requests
+import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import pytz
 def normalize_team_name(name: str) -> str:
     return (name or "").strip().lower()
 from nba_api.stats.endpoints import scoreboardv3
-from datetime import datetime
-from zoneinfo import ZoneInfo
+
+ESPN_ABBR_TO_FULL = {
+    "ATL":"Atlanta Hawks",
+    "BOS":"Boston Celtics",
+    "BKN":"Brooklyn Nets",
+    "CHA":"Charlotte Hornets",
+    "CHI":"Chicago Bulls",
+    "CLE":"Cleveland Cavaliers",
+    "DAL":"Dallas Mavericks",
+    "DEN":"Denver Nuggets",
+    "DET":"Detroit Pistons",
+    "GS":"Golden State Warriors",
+    "GSW":"Golden State Warriors",
+    "HOU":"Houston Rockets",
+    "IND":"Indiana Pacers",
+    "LAC":"LA Clippers",
+    "LAL":"Los Angeles Lakers",
+    "MEM":"Memphis Grizzlies",
+    "MIA":"Miami Heat",
+    "MIL":"Milwaukee Bucks",
+    "MIN":"Minnesota Timberwolves",
+    "NO":"New Orleans Pelicans",
+    "NOP":"New Orleans Pelicans",
+    "NY":"New York Knicks",
+    "NYK":"New York Knicks",
+    "OKC":"Oklahoma City Thunder",
+    "ORL":"Orlando Magic",
+    "PHI":"Philadelphia 76ers",
+    "PHX":"Phoenix Suns",
+    "POR":"Portland Trail Blazers",
+    "SAC":"Sacramento Kings",
+    "SA":"San Antonio Spurs",
+    "SAS":"San Antonio Spurs",
+    "TOR":"Toronto Raptors",
+    "UTA":"Utah Jazz",
+    "WAS":"Washington Wizards",
+}
+
+@st.cache_data(ttl=300)
+def fetch_scoreboard_nba_api(game_date: str):
+    from nba_api.stats.endpoints import scoreboardv3
+    last_err = None
+    for _ in range(3):
+        try:
+            return ("nba_api", scoreboardv3.ScoreboardV3(game_date=game_date, timeout=60).get_dict())
+        except Exception as e:
+            last_err = e
+            time.sleep(1.5)
+    raise last_err
+
+
+@st.cache_data(ttl=300)
+def fetch_scoreboard_espn(game_date: str):
+    date_compact = game_date.replace("-", "")
+    url = f"https://site.web.api.espn.com/apis/v2/sports/basketball/nba/scoreboard?dates={date_compact}"
+    r = requests.get(url, timeout=20)
+    r.raise_for_status()
+    return ("espn", r.json())
+    
 st.set_page_config(page_title="NBA Pro Monte Carlo Dashboard (Injury-aware)", layout="centered")
 st.title("🏀 NBA Pro Monte Carlo Betting Dashboard (Injury-aware)")
 
@@ -47,32 +108,104 @@ except Exception as e:
 default_team = {"off": 114, "def": 114, "pace": 100, "volatility": 1.0}
 
 # ---------------------------------------------------
-# Detect Today's Slate
 # ---------------------------------------------------
-game_date = st.date_input("Game Date", datetime.now(ZoneInfo("America/Chicago")).date())
+# Detect Slate (NBA API -> ESPN fallback)
+# ---------------------------------------------------
+central = ZoneInfo("America/Chicago")
+
+game_date = st.date_input(
+    "Game Date",
+    datetime.now(central).date()
+)
 today = game_date.strftime("%Y-%m-%d")
 
+if st.button("Refresh Slate"):
+    st.cache_data.clear()
+
+source = None
+scoreboard = None
+
 try:
-    scoreboard = scoreboardv3.ScoreboardV3(game_date=today).get_dict()
-except Exception as e:
-    st.error(f"Could not load today's games: {e}")
-    st.stop()
+    source, scoreboard = fetch_scoreboard_nba_api(today)
+except Exception:
+    try:
+        source, scoreboard = fetch_scoreboard_espn(today)
+    except Exception as e:
+        st.error(f"Could not load slate from NBA API or ESPN: {e}")
+        st.stop()
+
+st.caption(f"Slate source: {source}")
 
 games = []
-game_objects = scoreboard.get("scoreboard", {}).get("games", [])
+game_meta = {}  # label -> metadata for later use
 
-for game in game_objects:
-    home = game.get("homeTeam", {}).get("teamName")
-    away = game.get("awayTeam", {}).get("teamName")
-    status = game.get("gameStatusText", "")
+if source == "nba_api":
+    game_objects = scoreboard.get("scoreboard", {}).get("games", [])
+    for g in game_objects:
+        home = g.get("homeTeam", {}).get("teamName")
+        away = g.get("awayTeam", {}).get("teamName")
+        status = g.get("gameStatusText", "")
+        if home and away:
+            label = f"{away} @ {home} ({status})"
+            games.append(label)
+            game_meta[label] = g
 
-    if home and away:
-        games.append(f"{away} @ {home} ({status})")
+elif source == "espn":
+    # ESPN format: events -> competitions -> competitors
+    for ev in scoreboard.get("events", []):
+        comps = ev.get("competitions", [])
+        if not comps:
+            continue
+
+        comp = comps[0]
+        competitors = comp.get("competitors", [])
+        if len(competitors) < 2:
+            continue
+
+        # Identify home/away
+        home_comp = next((c for c in competitors if c.get("homeAway") == "home"), None)
+        away_comp = next((c for c in competitors if c.get("homeAway") == "away"), None)
+        if not home_comp or not away_comp:
+            continue
+
+        home_abbr = home_comp.get("team", {}).get("abbreviation")
+        away_abbr = away_comp.get("team", {}).get("abbreviation")
+
+        home = ESPN_ABBR_TO_FULL.get(home_abbr, home_comp.get("team", {}).get("displayName"))
+        away = ESPN_ABBR_TO_FULL.get(away_abbr, away_comp.get("team", {}).get("displayName"))
+
+        # Status/time
+        status_text = ev.get("status", {}).get("type", {}).get("shortDetail") or ev.get("status", {}).get("type", {}).get("description", "")
+        # Start time in ISO
+        dt_str = comp.get("date", ev.get("date", ""))  # ISO
+        time_ct = ""
+        if dt_str:
+            try:
+                dt_str = dt_str.replace("Z", "+00:00")
+                dt_utc = datetime.fromisoformat(dt_str)
+                dt_ct = dt_utc.astimezone(central)
+                time_ct = dt_ct.strftime("%-I:%M %p CT")
+            except Exception:
+                time_ct = ""
+
+        # Prefer time if scheduled; otherwise status text (live/final)
+        label_tail = time_ct if time_ct else status_text
+        label = f"{away} @ {home} ({label_tail})"
+
+        games.append(label)
+        game_meta[label] = {
+            "homeTeam": {"teamName": home, "score": home_comp.get("score")},
+            "awayTeam": {"teamName": away, "score": away_comp.get("score")},
+            "statusText": status_text,
+            "startTime": dt_str,
+            "homeAbbr": home_abbr,
+            "awayAbbr": away_abbr,
+        }
 
 if not games:
-    st.warning("No games today.")
+    st.warning("No games found for this date.")
     st.stop()
-    
+
 selected_game = st.selectbox("Select Game", games)
 
 selected_game_clean = selected_game.split(" (")[0]
