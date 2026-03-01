@@ -257,37 +257,39 @@ st.session_state["injured_players"] = selected_injured
 
 injury_settings = {}
 
-for pname in selected_injured:
-    status_key = f"status_{pname}"
-    limited_key = f"limited_pct_{pname}"
+if not selected_injured:
+    st.info("Select at least one player above to set Limited/Out.")
+else:
+    for pname in selected_injured:
+        status_key = f"status_{pname}"
+        limited_key = f"limited_pct_{pname}"
 
-    # Set defaults BEFORE widget creation
-    if status_key not in st.session_state:
-        st.session_state[status_key] = "Limited"
-    if limited_key not in st.session_state:
-        st.session_state[limited_key] = 15
+        # Defaults must be set BEFORE widgets with those keys are created
+        if status_key not in st.session_state:
+            st.session_state[status_key] = "Limited"
+        if limited_key not in st.session_state:
+            st.session_state[limited_key] = 15
 
-    status = st.selectbox(
-        f"Status for {pname}",
-        ["Limited", "Out"],
-        key=status_key
-    )
-
-    limited_pct = 0
-    if status == "Limited":
-        limited_pct = st.slider(
-            f"Minutes/usage reduction % for {pname}",
-            min_value=5,
-            max_value=60,
-            value=int(st.session_state[limited_key]),
-            step=1,
-            key=limited_key
+        status = st.selectbox(
+            f"Status for {pname}",
+            ["Limited", "Out"],
+            key=status_key
         )
 
-    injury_settings[pname] = {"status": status, "limited_pct": limited_pct}
+        limited_pct = 0
+        if status == "Limited":
+            limited_pct = st.slider(
+                f"Minutes/usage reduction % for {pname}",
+                min_value=5,
+                max_value=60,
+                value=int(st.session_state[limited_key]),
+                step=1,
+                key=limited_key
+            )
+
+        injury_settings[pname] = {"status": status, "limited_pct": limited_pct}
 
 st.caption("Out removes usage and redistributes to teammates. Limited reduces usage and redistributes the lost portion.")
-
 # ---------------------------------------------------
 # Usage adjustment + redistribution
 # ---------------------------------------------------
